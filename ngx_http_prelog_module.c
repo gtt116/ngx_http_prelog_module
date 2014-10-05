@@ -1,9 +1,9 @@
 /*
- * Logging before filter into upstream
+ * Copyright (C) Tiantian Gao
+ * Copyright (C) NetEase, Inc.
  *
- * To compile in nginx:
- *   $ ./configure --add-module=/your/module/path/ngx_http_prelog_module
- *   $ make
+ *
+ * Logging in the end of ACCESS_PHASE.
  *
  * Configuration:
  *
@@ -11,8 +11,11 @@
  *  Default: off;
  *  Context: http, server, location
  *
- *  Enable prelog will logging before into NGX_CONTENT_PHASE.
+ * Sometimes upstream server may block, then nginx can't wait for response to
+ * logging. This module is do logging before dive into upstream. Keep this in
+ * mind, there will be double line in access log file when a request in.
  */
+
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
@@ -86,9 +89,32 @@ ngx_http_prelog_init(ngx_conf_t *cf){
     return NGX_OK;
 }
 
+
+/*
+ * The code is stolen from ngx_http_request.c
+ */
+static void
+ngx_http_log_request(ngx_http_request_t *r)
+{
+    ngx_uint_t                  i, n;
+    ngx_http_handler_pt        *log_handler;
+    ngx_http_core_main_conf_t  *cmcf;
+
+    cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
+
+    log_handler = cmcf->phases[NGX_HTTP_LOG_PHASE].handlers.elts;
+    n = cmcf->phases[NGX_HTTP_LOG_PHASE].handlers.nelts;
+
+    for (i = 0; i < n; i++) {
+        log_handler[i](r);
+    }
+}
+
+
 static ngx_int_t
 ngx_http_prelog_handler(ngx_http_request_t* r){
     ngx_http_prelog_loc_conf_t *prelog_loc_conf;
+
     prelog_loc_conf = ngx_http_get_module_loc_conf(r, ngx_http_prelog_module);
 
     // if internal redirect, not prelog
@@ -96,10 +122,11 @@ ngx_http_prelog_handler(ngx_http_request_t* r){
         return NGX_DECLINED;
     }
 
-    ngx_http_log_handler(r);
+    ngx_http_log_request(r);
 
     return NGX_DECLINED;
 }
+
 
 static void*
 ngx_http_prelog_create_loc_conf(ngx_conf_t* cf){
